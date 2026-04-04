@@ -3,7 +3,7 @@
 # ==========================================
 *.bat
 *.sh
-.idea/
+.idea*/
 cmake-build-*/
 build/
 CMakeCache.txt
