@@ -7,8 +7,6 @@
 
 #include "KrakenPool.h"
 
-#include <stdexcept>
-
 // 构造函数
 KrakenPool::KrakenPool(size_t num_threads) : stop_(false) {
     for (int i = 0; i < num_threads; ++i) {
@@ -64,21 +62,21 @@ KrakenPool::~KrakenPool() {
     }
 }
 
-void KrakenPool::enqueue(std::function<void()> task) {
-
-    {
-        // 加锁添加任务到任务队列中
-        std::unique_lock<std::mutex> lock(this->queue_mutex_);
-
-        // 检查线程池是否已经关闭，如果关闭则不将新的任务添加到任务队列中
-        if (this->stop_) {
-            throw std::runtime_error("KrakenPool is stopped, cannot enqueue new tasks!");
-        }
-
-        // 将任务推入队列，使用std::move提升性能
-        this->tasks_.emplace(std::move(task));
-    }
-
-    // 唤醒工作线程处理任务
-    this->condition_.notify_one();
-}
+// void KrakenPool::enqueue(std::function<void()> task) {
+//
+//     {
+//         // 加锁添加任务到任务队列中
+//         std::unique_lock<std::mutex> lock(this->queue_mutex_);
+//
+//         // 检查线程池是否已经关闭，如果关闭则不将新的任务添加到任务队列中
+//         if (this->stop_) {
+//             throw std::runtime_error("KrakenPool is stopped, cannot enqueue new tasks!");
+//         }
+//
+//         // 将任务推入队列，使用std::move提升性能
+//         this->tasks_.emplace(std::move(task));
+//     }
+//
+//     // 唤醒工作线程处理任务
+//     this->condition_.notify_one();
+// }
