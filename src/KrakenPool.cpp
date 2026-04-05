@@ -18,7 +18,7 @@ KrakenPool::KrakenPool(size_t num_threads) : stop_(false) {
 
                 // 使用代码块缩小锁的生命周期
                 {
-                    std::unique_lock<std::mutex> lock(this->queue_mutex_);
+                    std::unique_lock<std::mutex> lock(this->pool_mutex_);
 
                     // 等待条件变量：线程池停止或者任务队列不为空
                     this->condition_.wait(lock, [this]() {
@@ -31,12 +31,13 @@ KrakenPool::KrakenPool(size_t num_threads) : stop_(false) {
                     }
 
                     // 从任务队列中取出任务，将function转换为右值引用，使用移动操作提高效率
-                    task = std::move(this->tasks_.front());
-                    this->tasks_.pop();
+                    this->tasks_.tryPop(task);
                 } // 锁生命周期结束，自动释放，线程执行任务时不会阻塞
 
                 // 执行任务
-                task();
+                if (task != nullptr) {
+                    task();
+                }
             }
         });
     }
@@ -45,11 +46,8 @@ KrakenPool::KrakenPool(size_t num_threads) : stop_(false) {
 // 析构函数
 KrakenPool::~KrakenPool() {
 
-    {
-        // 加锁设置线程池的状态
-        std::unique_lock<std::mutex> lock(this->queue_mutex_);
-        this->stop_ = true;
-    }
+    // 原子写入
+    this->stop_.store(true);
 
     // 唤醒所有队列退出循环
     this->condition_.notify_all();
@@ -61,22 +59,3 @@ KrakenPool::~KrakenPool() {
         }
     }
 }
-
-// void KrakenPool::enqueue(std::function<void()> task) {
-//
-//     {
-//         // 加锁添加任务到任务队列中
-//         std::unique_lock<std::mutex> lock(this->queue_mutex_);
-//
-//         // 检查线程池是否已经关闭，如果关闭则不将新的任务添加到任务队列中
-//         if (this->stop_) {
-//             throw std::runtime_error("KrakenPool is stopped, cannot enqueue new tasks!");
-//         }
-//
-//         // 将任务推入队列，使用std::move提升性能
-//         this->tasks_.emplace(std::move(task));
-//     }
-//
-//     // 唤醒工作线程处理任务
-//     this->condition_.notify_one();
-// }

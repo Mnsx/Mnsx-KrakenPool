@@ -62,20 +62,6 @@ int main() {
         safePrint("\n\t-> 其他类型任务执行结果: " + string_future.get());
 
         safePrint("\n[主线程] 线程池所有结果接收完毕");
-
-        // 模拟放入8个耗时任务
-        // for (int i = 1; i <= 8; ++i) {
-        //     pool.enqueue([i]() {
-        //         std::string msg = "\t-> 工作线程[" +
-        //             std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()) % 10000) +
-        //                 "]正在执行任务" + std::to_string(i) + "...";
-        //         safePrint(msg);
-        //
-        //         // 模拟耗时任务 200ms
-        //         std::this_thread::sleep_for(std::chrono::microseconds(200));
-        //     });
-        // }
-        // safePrint("[主线程] 线程任务已经加入任务队列，线程池停止...");
     } // 线程池声明周期结束，执行析构函数
 
     safePrint("[主线程] KrakenPool已经安全停止，程序正常退出");

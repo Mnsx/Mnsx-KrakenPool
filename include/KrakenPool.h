@@ -18,6 +18,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "SafeQueue.h"
+
 class KrakenPool {
 public:
     /**
@@ -42,23 +44,17 @@ public:
     template <typename F, typename... Args>
     auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>;
 
-    /**
-     * @brief 提交一个无参数、无返回值的任务到线程池（第一阶段基础版）
-     * @param task 一个可调用的对象，包含在std::function中
-     */
-    // void enqueue(std::function<void()> task);
-
     // 禁止拷贝构造和赋值操作
     KrakenPool(const KrakenPool&) = delete;
     KrakenPool& operator=(const KrakenPool&) = delete;
 
 private:
     std::vector<std::thread> workers_;               // 工作线程组
-    std::queue<std::function<void()>> tasks_;        // 任务队列
+    SafeQueue<std::function<void()>> tasks_;        // 线程安全任务队列
 
-    std::mutex queue_mutex_;                         // 互斥锁
+    std::mutex pool_mutex_;                         // 互斥锁
     std::condition_variable condition_;              // 条件变量
-    bool stop_;                                      // 停止标志位
+    std::atomic<bool> stop_;                                      // 停止标志位
 };
 
 template<typename F, typename... Args>
@@ -77,15 +73,16 @@ auto KrakenPool::enqueue(F &&f, Args &&... args) -> std::future<typename std::re
     // 获取future，提供异步获取任务结果
     std::future<return_type> res = task->get_future();
 
+    // 线程池关闭
+    if (this->stop_.load()) {
+        throw std::runtime_error("KrakenPool has been stopped");
+    }
+
+    // 容器存放的是std::function<void>，task通过std::bind擦除参数列表，通过Lambda包装隐藏返回值
     {
-        std::unique_lock<std::mutex> lock(this->queue_mutex_);
+        // 加锁，防止信号丢失
+        std::unique_lock<std::mutex> lock(pool_mutex_);
 
-        // 线程池关闭
-        if (this->stop_) {
-            throw std::runtime_error("KrakenPool has been stopped");
-        }
-
-        // 容器存放的是std::function<void>，task通过std::bind擦除参数列表，通过Lambda包装隐藏返回值
         this->tasks_.push([task]() {
             (*task)();
         });
