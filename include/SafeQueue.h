@@ -7,14 +7,22 @@
 #ifndef MNSX_KRAKENPOOL_SAFEQUEUE_H
 #define MNSX_KRAKENPOOL_SAFEQUEUE_H
 
-#include <memory>
+#include <limits>
 #include <mutex>
 #include <queue>
 
 template <typename T>
 class SafeQueue {
 public:
-    SafeQueue() = default;
+    /**
+     * @brief 构造函数
+     * @param max_size 容器最大容量，默认设置DEFAULT_MAC_SIZE
+     */
+    explicit SafeQueue(size_t max_size = DEFAULT_MAX_SIZE) : max_size_(max_size) {};
+
+    /**
+     * @brief 析构函数
+     */
     ~SafeQueue() = default;
 
     // 因为模板类携带锁，禁止拷贝和赋值
@@ -25,9 +33,17 @@ public:
      * @brief 将一个对象拷贝或移动进队列中
      * @param new_value 需要加入队列的对象
      */
-    void push(T new_value) {
+    bool push(T new_value) {
+
         std::lock_guard<std::mutex> lock(this->mutex_);
+
+        // 容量已满不允许添加
+        if (this->queue_.size() + 1 > this->max_size_) {
+            return false;
+        }
+
         this->queue_.push(std::move(new_value));
+        return true;
     }
 
     /**
@@ -36,9 +52,17 @@ public:
      * @param args 入队对象的构造参数
      */
     template <typename... Args>
-    void emplace(Args&&... args) {
+    bool emplace(Args&&... args) {
+
         std::lock_guard<std::mutex> lock(this->mutex_);
+
+        // 容量已满不允许添加
+        if (this->queue_.size() >= this->max_size_) {
+            return false;
+        }
+
         this->queue_.emplace(std::forward<Args>(args)...);
+        return true;
     }
 
     /**
@@ -93,8 +117,11 @@ public:
     }
 
 private:
-    mutable std::mutex mutex_;
-    std::queue<T> queue_;
+    mutable std::mutex mutex_; // 互斥锁
+    std::queue<T> queue_; // 队列容器
+
+    size_t max_size_; // 队列最大容量
+    constexpr const static size_t DEFAULT_MAX_SIZE = std::numeric_limits<size_t>::max(); // 默认队列最大容量
 };
 
 #endif //MNSX_KRAKENPOOL_SAFEQUEUE_H

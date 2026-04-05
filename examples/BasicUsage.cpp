@@ -9,7 +9,6 @@
 #include <chrono>
 #include <string>
 #include <vector>
-#include <cstdlib>
 
 #include "KrakenPool.h"
 
@@ -35,11 +34,17 @@ int heavyComputation(int a, int b) {
 }
 
 int main() {
-    safePrint("[主线程] 启动 KrakenPool...");
+
+    std::string curThreadId =std::to_string(
+                 std::hash<std::thread::id>{}(std::this_thread::get_id()) % 10000);
+
+    safePrint("[主线程 " + curThreadId + "] 启动 KrakenPool...");
 
     {
         // 初始化线程池设置3个线程
-        KrakenPool pool(3);
+        // KrakenPool pool(3);
+        // 测试拒绝策略
+        KrakenPool pool(1, 2, RejectPolicies::callerRuns);
         // 用一个vector手机任务的future
         std::vector<std::future<int>> results;
 

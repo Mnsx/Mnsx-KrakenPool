@@ -8,13 +8,14 @@
 #include "KrakenPool.h"
 
 // 构造函数
-KrakenPool::KrakenPool(size_t num_threads) : stop_(false) {
-    for (int i = 0; i < num_threads; ++i) {
+KrakenPool::KrakenPool(size_t num_threads, size_t max_queue_size, const RejectHandler& reject_handler) :
+    max_queue_size_(max_queue_size), reject_handler_(reject_handler), tasks_(max_queue_size) {
+    for (auto i = 0; i < num_threads; ++i) {
         // 使用emplace_back直接在vector的内部构造线程
         workers_.emplace_back([this]() {
             // 死循环，让所有线程待命
             while (true) {
-                std::function<void()> task;
+                Task task;
 
                 // 使用代码块缩小锁的生命周期
                 {
@@ -22,11 +23,11 @@ KrakenPool::KrakenPool(size_t num_threads) : stop_(false) {
 
                     // 等待条件变量：线程池停止或者任务队列不为空
                     this->condition_.wait(lock, [this]() {
-                        return this->stop_ || !this->tasks_.empty();
+                        return this->stop_.load() || !this->tasks_.empty();
                     });
 
                     // 如果线程池已经停止，线程则退出循环
-                    if (this->stop_ && this->tasks_.empty()) {
+                    if (this->stop_.load() && this->tasks_.empty()) {
                         return;
                     }
 

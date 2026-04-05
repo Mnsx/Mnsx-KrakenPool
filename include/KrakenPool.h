@@ -12,7 +12,6 @@
 #include <future>
 #include <memory>
 #include <mutex>
-#include <queue>
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
@@ -20,13 +19,46 @@
 
 #include "SafeQueue.h"
 
+using Task = std::function<void()>;
+
+using RejectHandler = std::function<void(Task&)>;
+
+namespace RejectPolicies {
+    // 默认，直接抛出异常
+    inline void abort(Task& task) {
+        throw std::runtime_error("The task queue of KrakenPool is full");
+    }
+
+    // 由调用入队操作的线程自己执行任务
+    inline void callerRuns(Task& task) {
+        if (task != nullptr) {
+            task();
+        }
+    }
+
+    // 静默丢弃
+    inline void discard(Task& task) {
+    }
+
+    // 丢弃最老的任务
+    inline void discardOldest(Task& task) {
+    }
+
+    // 阻塞等待
+    inline void blockedWait(Task& task) {
+    }
+}
+
 class KrakenPool {
 public:
     /**
      * @brief 构造并启动线程池
      * @param num_threads 初始化的线程数量，默认值为当前系统支持的CPU核心数量
+     * @param max_queue_size 任务队列最大长度，默认为DEFAULT_MAX_QUEUE_SIZE
+     * @param reject_handler 线程池拒绝处理器，默认为RejectPolicies::Abort，用户可以自定义
      */
-    explicit KrakenPool(size_t num_threads = std::thread::hardware_concurrency());
+    explicit KrakenPool(size_t num_threads = std::thread::hardware_concurrency(),
+        size_t max_queue_size = DEFAULT_MAX_QUEUE_SIZE, const RejectHandler& reject_handler = RejectPolicies::abort);
 
     /**
      * @brief 析构函数，安全关闭线程池
@@ -49,12 +81,17 @@ public:
     KrakenPool& operator=(const KrakenPool&) = delete;
 
 private:
-    std::vector<std::thread> workers_;               // 工作线程组
-    SafeQueue<std::function<void()>> tasks_;        // 线程安全任务队列
+    std::vector<std::thread> workers_; // 工作线程组
+    SafeQueue<Task> tasks_; // 线程安全任务队列
 
-    std::mutex pool_mutex_;                         // 互斥锁
-    std::condition_variable condition_;              // 条件变量
-    std::atomic<bool> stop_;                                      // 停止标志位
+    std::mutex pool_mutex_; // 互斥锁
+    std::condition_variable condition_; // 条件变量
+    std::atomic<bool> stop_{false}; // 停止标志位
+
+    RejectHandler reject_handler_; // 拒绝策略
+
+    size_t max_queue_size_; // 任务队列最大长度
+    constexpr const static size_t DEFAULT_MAX_QUEUE_SIZE = 128; // 任务队列默认最大长度，以IO密集型设置
 };
 
 template<typename F, typename... Args>
@@ -79,13 +116,27 @@ auto KrakenPool::enqueue(F &&f, Args &&... args) -> std::future<typename std::re
     }
 
     // 容器存放的是std::function<void>，task通过std::bind擦除参数列表，通过Lambda包装隐藏返回值
+    Task wrappered_task = [task]() {
+        (*task)();
+    };
+
+    bool is_pushed = false;
     {
         // 加锁，防止信号丢失
         std::unique_lock<std::mutex> lock(pool_mutex_);
 
-        this->tasks_.push([task]() {
-            (*task)();
-        });
+        // 必须保证，队列中有空位才能使用move
+        if (this->tasks_.size() < this->max_queue_size_) {
+
+            is_pushed = this->tasks_.push(std::move(wrappered_task));
+        }
+    }
+
+        // 如果没有加入成功代表队列已经满了
+    if (is_pushed == false) {
+        // 执行拒绝策略
+        this->reject_handler_(wrappered_task);
+        return res;
     }
 
     // 唤醒工作线程
