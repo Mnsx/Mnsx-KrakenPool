@@ -20,42 +20,42 @@
 #include "SafeQueue.h"
 
 using Task = std::function<void()>;
+using DelayedTime = std::chrono::steady_clock::time_point;
+struct DelayedTask {
+    // 任务计划执行的绝对时间点
+    DelayedTime execute_time_;
+    // 类型擦除后的任务实体
+    Task task_;
+    // 构造函数
+    DelayedTask(DelayedTime time, Task&& task) : execute_time_(time), task_(std::move(task)) {}
+    // 重载比较符号，给priority_queue提供排序规则
+    bool operator<(const DelayedTask& other) const {
+        return this->execute_time_ > other.execute_time_;
+    }
+};
 
-using RejectHandler = std::function<void(SafeQueue<Task>&, Task&)>;
-
+using RejectHandler = std::function<void(SafeQueue<DelayedTask>&, Task&)>;
 namespace RejectPolicies {
     // 默认，直接抛出异常
-    inline void abort(SafeQueue<Task>& safe_queue, Task& task) {
+    inline void abort(SafeQueue<DelayedTask>& safe_queue,Task& task) {
         throw std::runtime_error("The task queue of KrakenPool is full");
     }
 
     // 由调用入队操作的线程自己执行任务
-    inline void callerRuns(SafeQueue<Task>& safe_queue, Task& task) {
+    inline void callerRuns(SafeQueue<DelayedTask>& safe_queue,Task& task) {
         if (task != nullptr) {
             task();
         }
     }
 
     // 静默丢弃，如果调用future.get()会抛出Broken promise
-    inline void discard(SafeQueue<Task>& safe_queue, Task& task) {
+    inline void discard(SafeQueue<DelayedTask>& safe_queue,Task& task) {
 
         // 不错任何处理
     }
 
-    // 丢弃最老的任务，调用最老的任务会抛出Broken promise
-    inline void discardOldest(SafeQueue<Task>& safe_queue, Task& task) {
-        Task oldest_task;
-
-        // 乐观锁的方式，将新的任务添加进去
-        while (!safe_queue.emplace(std::move(task))) {
-
-            // 尝试获取最老的任务
-            safe_queue.tryPop(oldest_task);
-        }
-    }
-
     // 阻塞等待
-    inline void blockedWait(SafeQueue<Task>& safe_queue, Task& task) {
+    inline void blockedWait(SafeQueue<DelayedTask>& safe_queue,Task& task) {
     }
 }
 
@@ -86,13 +86,16 @@ public:
     template <typename F, typename... Args>
     auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>;
 
+    template <typename Req, typename Period, typename F, typename... Args>
+    auto enqueue_after(const std::chrono::duration<Req, Period>& delay, F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>;
+
     // 禁止拷贝构造和赋值操作
     KrakenPool(const KrakenPool&) = delete;
     KrakenPool& operator=(const KrakenPool&) = delete;
 
 private:
     std::vector<std::thread> workers_; // 工作线程组
-    SafeQueue<Task> tasks_; // 线程安全任务队列
+    SafeQueue<DelayedTask> tasks_; // 线程安全任务队列
 
     std::mutex pool_mutex_; // 互斥锁
     std::condition_variable condition_; // 条件变量
@@ -102,10 +105,34 @@ private:
 
     size_t max_queue_size_; // 任务队列最大长度
     constexpr const static size_t DEFAULT_MAX_QUEUE_SIZE = 128; // 任务队列默认最大长度，以IO密集型设置
+
+    template <typename F, typename... Args>
+    auto enqueue_at(DelayedTime execute_time, F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>;
 };
 
 template<typename F, typename... Args>
-auto KrakenPool::enqueue(F &&f, Args &&... args) -> std::future<typename std::result_of<F(Args...)>::type> {
+auto KrakenPool::enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type> {
+
+    return this->enqueue_at(
+        std::chrono::steady_clock::now(),
+        std::forward<F>(f),
+        std::forward<Args>(args)...
+    );
+}
+
+template<typename Req, typename Period, typename F, typename... Args>
+auto KrakenPool::enqueue_after(const std::chrono::duration<Req, Period> &delay, F &&f, Args &&... args) -> std::future<typename std::result_of<F(Args...)>::type> {
+
+    return this->enqueue_at(
+        std::chrono::steady_clock::now() + delay,
+        std::forward<F>(f),
+        std::forward<Args>(args)...
+    );
+}
+
+template<typename F, typename... Args>
+auto KrakenPool::enqueue_at(DelayedTime execute_time, F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type> {
+
     // 通过std::result_of推导返回值的类型
     using return_type = typename std::result_of<F(Args...)>::type;
 
@@ -130,23 +157,23 @@ auto KrakenPool::enqueue(F &&f, Args &&... args) -> std::future<typename std::re
         (*task)();
     };
 
+    bool is_pushed = false;
     {
-        bool is_pushed = false;
         // 加锁，防止信号丢失
         std::unique_lock<std::mutex> lock(pool_mutex_);
 
         // 必须保证，队列中有空位才能使用move
         if (this->tasks_.size() < this->max_queue_size_) {
 
-            is_pushed = this->tasks_.emplace(std::move(wrappered_task));
+            is_pushed = this->tasks_.emplace(execute_time, std::move(wrappered_task));
         }
+    }
 
-        // 如果没有加入成功代表队列已经满了
-        if (is_pushed == false) {
-            // 执行拒绝策略
-            this->reject_handler_(this->tasks_, wrappered_task);
-            return res;
-        }
+    // 如果没有加入成功代表队列已经满了
+    if (is_pushed == false) {
+        // 执行拒绝策略
+        this->reject_handler_(this->tasks_, wrappered_task);
+        return res;
     }
 
     // 唤醒工作线程

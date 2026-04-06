@@ -77,7 +77,7 @@ public:
         }
 
         // 压榨效率，因为下一行pop，所以直接移动
-        value = std::move(this->queue_.front());
+        value = std::move(const_cast<T&>(this->queue_.top()));
         this->queue_.pop();
         return true;
     }
@@ -112,13 +112,13 @@ public:
      * @brief 暴露底层队列（慎用，配合 getMutex() 保证安全）
      * @return 底层队列引用
      */
-    std::queue<T>& getUnderlyingQueue() {
+    std::priority_queue<T>& getUnderlyingQueue() {
         return this->queue_;
     }
 
 private:
     mutable std::mutex mutex_; // 互斥锁
-    std::queue<T> queue_; // 队列容器
+    std::priority_queue<T> queue_; // 队列容器
 
     size_t max_size_; // 队列最大容量
     constexpr const static size_t DEFAULT_MAX_SIZE = std::numeric_limits<size_t>::max(); // 默认队列最大容量
