@@ -38,7 +38,7 @@ public:
         std::lock_guard<std::mutex> lock(this->mutex_);
 
         // 容量已满不允许添加
-        if (this->queue_.size() + 1 > this->max_size_) {
+        if (this->queue_.size() >= this->max_size_) {
             return false;
         }
 
