@@ -21,31 +21,41 @@
 
 using Task = std::function<void()>;
 
-using RejectHandler = std::function<void(Task&)>;
+using RejectHandler = std::function<void(SafeQueue<Task>&, Task&)>;
 
 namespace RejectPolicies {
     // 默认，直接抛出异常
-    inline void abort(Task& task) {
+    inline void abort(SafeQueue<Task>& safe_queue, Task& task) {
         throw std::runtime_error("The task queue of KrakenPool is full");
     }
 
     // 由调用入队操作的线程自己执行任务
-    inline void callerRuns(Task& task) {
+    inline void callerRuns(SafeQueue<Task>& safe_queue, Task& task) {
         if (task != nullptr) {
             task();
         }
     }
 
-    // 静默丢弃
-    inline void discard(Task& task) {
+    // 静默丢弃，如果调用future.get()会抛出Broken promise
+    inline void discard(SafeQueue<Task>& safe_queue, Task& task) {
+
+        // 不错任何处理
     }
 
-    // 丢弃最老的任务
-    inline void discardOldest(Task& task) {
+    // 丢弃最老的任务，调用最老的任务会抛出Broken promise
+    inline void discardOldest(SafeQueue<Task>& safe_queue, Task& task) {
+        Task oldest_task;
+
+        // 乐观锁的方式，将新的任务添加进去
+        while (!safe_queue.emplace(std::move(task))) {
+
+            // 尝试获取最老的任务
+            safe_queue.tryPop(oldest_task);
+        }
     }
 
     // 阻塞等待
-    inline void blockedWait(Task& task) {
+    inline void blockedWait(SafeQueue<Task>& safe_queue, Task& task) {
     }
 }
 
@@ -120,23 +130,23 @@ auto KrakenPool::enqueue(F &&f, Args &&... args) -> std::future<typename std::re
         (*task)();
     };
 
-    bool is_pushed = false;
     {
+        bool is_pushed = false;
         // 加锁，防止信号丢失
         std::unique_lock<std::mutex> lock(pool_mutex_);
 
         // 必须保证，队列中有空位才能使用move
         if (this->tasks_.size() < this->max_queue_size_) {
 
-            is_pushed = this->tasks_.push(std::move(wrappered_task));
+            is_pushed = this->tasks_.emplace(std::move(wrappered_task));
         }
-    }
 
         // 如果没有加入成功代表队列已经满了
-    if (is_pushed == false) {
-        // 执行拒绝策略
-        this->reject_handler_(wrappered_task);
-        return res;
+        if (is_pushed == false) {
+            // 执行拒绝策略
+            this->reject_handler_(this->tasks_, wrappered_task);
+            return res;
+        }
     }
 
     // 唤醒工作线程
