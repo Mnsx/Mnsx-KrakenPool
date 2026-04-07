@@ -68,7 +68,7 @@ public:
      * @param reject_handler 线程池拒绝处理器，默认为RejectPolicies::Abort，用户可以自定义
      */
     explicit KrakenPool(size_t num_threads = std::thread::hardware_concurrency(),
-        size_t max_queue_size = DEFAULT_MAX_QUEUE_SIZE, const RejectHandler& reject_handler = RejectPolicies::abort);
+        size_t max_queue_size = DEFAULT_MAX_QUEUE_SIZE, RejectHandler reject_handler = RejectPolicies::abort);
 
     /**
      * @brief 析构函数，安全关闭线程池
