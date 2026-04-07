@@ -52,7 +52,7 @@ int main() {
             results.emplace_back(pool.enqueue(heavyComputation, i, i * 10));
         }
 
-        auto string_future = pool.enqueue([](const std::string& name) {
+        auto string_future = pool.enqueue_after(std::chrono::milliseconds(5000), [](const std::string& name) {
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             return "Hello, " + name + "!";
         }, "Mnsx_x");
