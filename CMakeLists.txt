@@ -12,8 +12,9 @@ find_package(Threads REQUIRED)
 # ==========================================
 # 引入外部基建 (Mnsx-ArgusLog)
 # ==========================================
-# 执行argus的cmake
-add_subdirectory(third_party/argus_log)
+if(NOT TARGET ArgusLog)
+    add_subdirectory(third_party/argus_log)
+endif()
 
 # ==========================================
 # 定义核心库 (KrakenPool)
