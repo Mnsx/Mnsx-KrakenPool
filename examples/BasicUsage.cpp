@@ -11,6 +11,10 @@
 #include <vector>
 
 #include "KrakenPool.h"
+#include "Logger.h"
+#include "LogLevel.h"
+
+using namespace mnsx::kraken;
 
 // 防止多线程调用std::cout导致输出错乱
 std::mutex cout_mutex;
@@ -58,6 +62,7 @@ int main() {
         }, "Mnsx_x");
 
         safePrint("[主线程] 获取任务的异步结果...");
+        LOG_DEBUG << "hhh";
 
         for (size_t i = 0; i < results.size(); ++i) {
             int res = results[i].get();
